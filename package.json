@@ -1,0 +1,10 @@
+{
+  "name": "notion-tag-sync",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Sync Notion relations to multi-select tags",
+  "main": "sync_tags.js",
+  "dependencies": {
+    "@notionhq/client": "^2.2.15"
+  }
+}
