@@ -1,0 +1,29 @@
+name: Notion Tag Sync Only
+
+on:
+  schedule:
+    # 每天跑一次，或者你可以改成 "0 * * * *" 每小时跑一次
+    - cron: "0 22 * * *" # 北京时间 06:00
+  workflow_dispatch: # 允许手动点击运行
+
+jobs:
+  sync-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Tag Sync
+        run: node sync_tags.js
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          DATABASE_ID: ${{ secrets.DATABASE_ID }} # 文章库 ID
+          TAGS_DB_ID: ${{ secrets.TAGS_DB_ID }}   # 全局标签库 ID
