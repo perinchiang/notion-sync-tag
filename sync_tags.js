@@ -7,7 +7,7 @@ const TAGS_DB_ID = process.env.TAGS_DB_ID;     // 全局标签数据库
 
 // 修改为你实际的属性名称
 const PROPS = {
-    RELATION: "GlobalTags",  // 你的 Relation 属性名 (连接到全局标签库的)
+    RELATION: "Tag",  // 你的 Relation 属性名 (连接到全局标签库的)
     SELECT: "tags"           // NotionNext 使用的 Multi-select/Select 属性名
 };
 
