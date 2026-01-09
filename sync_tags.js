@@ -1,132 +1,72 @@
 import { Client } from "@notionhq/client";
 
-// --- 配置区域 ---
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const ARTICLE_DB_ID = process.env.DATABASE_ID;
-const TAGS_DB_ID = process.env.TAGS_DB_ID;
 
-// 你的列名配置
-const PROPS = {
-    RELATION: "Tag",  // 你的关联属性名
-    SELECT: "tags"    // 你的多选属性名
-};
-// ----------------
+// 你的配置
+const TARGET_RELATION_NAME = "Tag"; // 你认为的关联属性名
+const TARGET_SELECT_NAME = "tags";  // 你认为的多选属性名
 
-async function getTagMap() {
-    console.log(`\n🔍 正在读取全局标签库 (ID: ${TAGS_DB_ID})...`);
-    const tagMap = {};
-    let hasMore = true;
-    let cursor = undefined;
+async function runDiagnosis() {
+    console.log("👨‍⚕️ 开始诊断数据库结构...");
+    console.log(`🎯 目标数据库 ID: ${ARTICLE_DB_ID}`);
 
-    while (hasMore) {
-        const res = await notion.databases.query({
-            database_id: TAGS_DB_ID,
-            start_cursor: cursor,
+    try {
+        const response = await notion.databases.query({
+            database_id: ARTICLE_DB_ID,
+            page_size: 1, // 只取 1 篇来看看结构
         });
 
-        for (const page of res.results) {
-            // 尝试获取标题 (Name/Title/Entry)
-            const titleKeys = Object.keys(page.properties).filter(key => page.properties[key].type === 'title');
-            if (titleKeys.length > 0) {
-                const titleProp = page.properties[titleKeys[0]];
-                if (titleProp.title.length > 0) {
-                    const tagName = titleProp.title[0].plain_text;
-                    tagMap[page.id] = tagName;
-                }
-            }
-        }
-        hasMore = res.has_more;
-        cursor = res.next_cursor;
-    }
-    const count = Object.keys(tagMap).length;
-    console.log(`✅ 字典构建完成，共找到 ${count} 个标签。`);
-    if (count === 0) console.warn("⚠️ 警告：全局标签库是空的，或者机器人没权限读取！");
-    return tagMap;
-}
-
-async function syncArticles(tagMap) {
-    console.log(`\n🚀 正在扫描文章数据库 (ID: ${ARTICLE_DB_ID})...`);
-    
-    const pages = await notion.databases.query({
-        database_id: ARTICLE_DB_ID,
-    });
-
-    console.log(`📄 共扫描到 ${pages.results.length} 篇文章`);
-
-    for (const page of pages.results) {
-        const pageTitle = page.properties['Title']?.title[0]?.plain_text || page.id;
-        
-        // 1. 检查 Relation 属性是否存在
-        const relationProp = page.properties[PROPS.RELATION];
-        if (!relationProp) {
-            console.error(`❌ [${pageTitle}] 找不到名为 "${PROPS.RELATION}" 的属性！请检查配置的属性名是否正确。`);
-            continue;
+        if (response.results.length === 0) {
+            console.log("⚠️ 数据库是空的，没法诊断。请至少创建一篇文章。");
+            return;
         }
 
-        const relationIds = relationProp.relation.map(r => r.id);
+        const page = response.results[0];
+        const props = page.properties;
         
-        // --- 调试信息：打印这篇文章关联了什么 ---
-        if (relationIds.length > 0) {
-             // console.log(`   [${pageTitle}] 关联了 ID: ${relationIds.join(', ')}`);
+        console.log("\n========================================");
+        console.log(`📝 正在分析文章: "${page.id}"`);
+        console.log("========================================");
+        console.log("🔍 发现以下属性 (Property Name -> Type):");
+        
+        const allKeys = Object.keys(props);
+        let foundRelation = false;
+        let foundSelect = false;
+
+        allKeys.forEach(key => {
+            const type = props[key].type;
+            console.log(`   - [${key}]: ${type}`);
+
+            if (key === TARGET_RELATION_NAME) foundRelation = true;
+            if (key === TARGET_SELECT_NAME) foundSelect = true;
+        });
+
+        console.log("\n----------------------------------------");
+        console.log("📋 匹配检查结果:");
+        
+        if (foundRelation) {
+            console.log(`✅ 关联属性 "${TARGET_RELATION_NAME}" 存在！`);
+            // 深入检查一下这个关联属性的数据结构
+            const relationData = props[TARGET_RELATION_NAME];
+            console.log("   数据结构预览:", JSON.stringify(relationData, null, 2));
         } else {
-             // console.log(`   [${pageTitle}] 没有关联任何标签 (跳过)`);
-             continue; 
+            console.log(`❌ 关联属性 "${TARGET_RELATION_NAME}" 未找到！`);
+            console.log("   👉 可能原因：名字拼写错误（注意大小写）、空格，或者根本没创建这个属性。");
+            console.log("   👉 请从上面的列表里复制真实的名字。");
         }
 
-        // 2. 匹配名字
-        const targetTags = [];
-        for (const id of relationIds) {
-            const name = tagMap[id];
-            if (name) {
-                targetTags.push(name);
-            } else {
-                console.warn(`⚠️ [${pageTitle}] 关联了一个未知标签ID (${id})，它不在全局标签库里 (可能是删除了或数据库ID填错了)`);
-            }
-        }
-
-        if (targetTags.length === 0) {
-            console.log(`   [${pageTitle}] 匹配后标签列表为空，无需同步。`);
-            continue;
-        }
-
-        // 3. 检查 tags 属性
-        const selectProp = page.properties[PROPS.SELECT];
-        if (!selectProp) {
-             console.error(`❌ [${pageTitle}] 找不到名为 "${PROPS.SELECT}" 的属性！`);
-             continue;
-        }
-
-        const currentTags = selectProp.multi_select.map(opt => opt.name);
-        
-        const targetSorted = [...targetTags].sort().join(",");
-        const currentSorted = [...currentTags].sort().join(",");
-
-        if (targetSorted !== currentSorted) {
-            console.log(`🔄 [${pageTitle}] 需要更新:`);
-            console.log(`   🔴 原: ${currentSorted || "(空)"}`);
-            console.log(`   🟢 新: ${targetSorted}`);
-            
-            await notion.pages.update({
-                page_id: page.id,
-                properties: {
-                    [PROPS.SELECT]: {
-                        multi_select: targetTags.map(name => ({ name }))
-                    }
-                }
-            });
-            console.log(`   ✅ 更新成功`);
+        if (foundSelect) {
+            console.log(`✅ 多选属性 "${TARGET_SELECT_NAME}" 存在！`);
         } else {
-            console.log(`   💤 [${pageTitle}] 标签已一致，跳过。`);
+            console.log(`❌ 多选属性 "${TARGET_SELECT_NAME}" 未找到！`);
+            console.log("   👉 请检查上面的列表，看看它到底叫什么。");
         }
-    }
-}
+        console.log("----------------------------------------\n");
 
-async function main() {
-    try {
-        await getTagMap().then(syncArticles);
     } catch (e) {
-        console.error("❌ 发生严重错误:", e);
+        console.error("💥 诊断过程发生错误:", e);
     }
 }
 
-main();
+runDiagnosis();
